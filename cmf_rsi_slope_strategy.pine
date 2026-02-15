@@ -1,0 +1,112 @@
+//@version=6
+strategy("RSI+CMF Slope Strategy (Robust Exit Version)",
+     calc_on_every_tick=true,
+     overlay=false,
+     initial_capital=80000,
+     currency=currency.SEK,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     pyramiding=1,
+     commission_type=strategy.commission.cash_per_order,
+     commission_value=18,
+     slippage=0,
+     process_orders_on_close=true,     // <-- Viktigt för stabil exit
+     calc_on_order_fills=false,
+     use_bar_magnifier=false,
+     backtest_fill_limits_assumption=2,
+     behind_chart=false)
+
+// === Start Date ===
+startYear  = input.int(2015, "Start Year", minval=1900)
+startMonth = input.int(1, "Start Month", minval=1, maxval=12)
+startDay   = input.int(1, "Start Day", minval=1, maxval=31)
+startDate  = timestamp(startYear, startMonth, startDay, 0, 0)
+inDateRange = time >= startDate
+
+// === Inputs ===
+rsiLen        = input.int(14, "RSI Length")
+cmfLen        = input.int(20, "CMF Length")
+smoothLen     = input.int(3, "Smoothing Length (EMA)", minval=1)
+
+enterMinSlope = input.float(0.00, "Min Upward Slope for Entry", step=0.01)
+exitMinSlope  = input.float(0.00, "Min Downward Slope for Exit", step=0.01)
+crashSlope    = input.float(0.05, "RSI Crash Min Slope (normalized units)", minval=0.0, step=0.01)
+
+// === RSI Normalized + Smoothed ===
+_rsi        = ta.rsi(close, rsiLen)
+rsi_normRaw = (_rsi - 50.0) / 50.0
+rsi         = ta.ema(rsi_normRaw, smoothLen)
+
+// === Manual CMF (using math.sum) normalized + smoothed ===
+mfv = ((close - low) - (high - close)) / (high - low) * volume
+mfv := na(mfv) ? 0 : mfv
+rawCmf = math.sum(mfv, cmfLen) / math.sum(volume, cmfLen)
+cmfRaw = math.max(-1.0, math.min(1.0, rawCmf))
+cmf    = ta.ema(cmfRaw, smoothLen)
+
+// === Slopes ===
+rsiSlope = rsi - rsi[1]
+cmfSlope = cmf - cmf[1]
+
+// === Entry: both slopes upward ===
+longSignalUp = (rsiSlope > enterMinSlope) and (cmfSlope > enterMinSlope)
+
+// === Exit 1: both slopes downward ===
+exitSlopesDown = (rsiSlope < -exitMinSlope) and (cmfSlope < -exitMinSlope)
+
+// === Exit 2: RSI crash through CMF (robust version) ===
+// Eliminates intrabar false signals
+rsiCrossesBelow = rsi[1] > cmf[1] and rsi <= cmf
+rsiCrashDownHard = rsiSlope < -crashSlope
+
+exitCrash = rsiCrossesBelow and rsiCrashDownHard
+
+// === Trading Logic (robust) ===
+if inDateRange and strategy.position_size <= 0 and longSignalUp
+    strategy.entry("Long", strategy.long)
+
+if inDateRange and strategy.position_size > 0 and (exitSlopesDown or exitCrash)
+    strategy.close("Long")
+
+// === Plots ===
+plot(rsi, "Smoothed Normalized RSI", color.new(color.green, 0), 2)
+plot(cmf, "Smoothed Normalized CMF", color.new(color.orange, 0), 2)
+hline(0.0, "Zero Line", color.gray)
+
+plot(rsiSlope, "RSI Slope", color.new(color.green, 60))
+plot(cmfSlope, "CMF Slope", color.new(color.orange, 60))
+hline(0.0, "Slope Zero", color.gray)
+
+// === Visual Signals ===
+plotshape(longSignalUp,
+     title="Long Signal (Up Slopes)",
+     location=location.bottom,
+     style=shape.triangleup,
+     color=color.green,
+     size=size.tiny,
+     text="Long")
+
+plotshape(exitSlopesDown,
+     title="Exit Slopes Down",
+     location=location.top,
+     style=shape.triangledown,
+     color=color.red,
+     size=size.tiny,
+     text="Exit")
+
+plotshape(exitCrash,
+     title="Exit Crash Detected",
+     location=location.top,
+     style=shape.xcross,
+     color=color.red,
+     size=size.tiny,
+     text="Crash")
+
+// === Debug: Real exit condition when actually in position ===
+plotshape(strategy.position_size > 0 and exitCrash,
+     title="EXIT REAL (Crash+In Position)",
+     location=location.top,
+     style=shape.square,
+     color=color.blue,
+     size=size.tiny,
+     text="EXIT!")
