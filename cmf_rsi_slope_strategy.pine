@@ -10,7 +10,7 @@ strategy("RSI+CMF Slope Strategy (Robust Exit Version)",
      commission_type=strategy.commission.cash_per_order,
      commission_value=18,
      slippage=0,
-     process_orders_on_close=true,     // <-- Viktigt för stabil exit
+     process_orders_on_close=true,
      calc_on_order_fills=false,
      use_bar_magnifier=false,
      backtest_fill_limits_assumption=2,
